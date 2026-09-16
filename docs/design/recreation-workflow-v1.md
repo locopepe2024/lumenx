@@ -17,6 +17,63 @@
 第一版支持原片结构复刻与产品外观替换。精确切点是分析/装配约束；单次生成不能承诺帧级遵守原片。保留原声、静音和新声音设计作为明确不同选择。
 暂不做自动ASR、口型替换、掩膜追踪或原片逐像素无损编辑。media主机接入方式未确认，不能假定Chat能直接远程执行FFmpeg。
 
+## 资产管理与检索前置设计
+
+### 现有资产库的能力边界
+
+现有 `GlobalAssetLibrary` 是角色、场景、道具三类 JSON 资产池，文件为
+`output/library_assets.json`。前端资产库在加载所有系列、独立项目和全局池后，
+只在浏览器内按名称/描述做线性过滤；没有服务端分页、标签、媒体类型、来源镜头、
+时间范围、指纹或派生关系检索。上传接口只登记图片路径，不能登记原片视频、镜头或
+证据帧。资产删除的引用检查也只覆盖 storyboard 的角色、场景和道具字段。
+
+因此复刻切片不能把每个镜头和证据帧直接作为 `Character`、`Scene` 或 `Prop`；这会
+污染现有资产池，也无法可靠地从几十个镜头中检索同一原片、同一时间范围或同一替换
+对象。现有 UI 的检索实现是客户端事实，不代表对生产大库有可接受的性能。
+
+### 统一媒体索引（下一切片必须先做）
+
+引入 owner-scoped `MediaRecord` 与 `AssetEntry` 两个概念，并让复刻和现有资产库
+通过 `media_id` 关联：
+
+| 记录 | 用途 | 必要检索字段 |
+| --- | --- | --- |
+| `MediaRecord` | 一份不可变文件及其派生关系 | `media_id`, owner, kind, sha256, storage key, mime, bytes, duration, width, height, parent_media_id |
+| `AssetEntry` | 用户可见的可复用对象 | `asset_id`, media_id, display name, asset kind, tags, source project, starred, created_at |
+| `ShotMediaBinding` | 原片与镜头/证据的关系 | source media, analysis revision, shot id, start/end PTS, frame PTS, role |
+
+`kind` 至少区分 `source_video`, `shot_clip`, `evidence_frame`, `contact_sheet`,
+`reference_image`, `generated_video`, `audio`。原片和生成结果进入媒体索引；只有用户
+明确保存或确认的替换对象才进入可复用资产库。物理文件、展示 URL、资产条目和生成
+任务不能互相充当身份。
+
+### 检索契约
+
+首版检索必须在服务端执行并限制结果集：
+
+```text
+GET /media?kind=&q=&tag=&source_media_id=&project_id=&cursor=&limit=
+GET /assets?kind=&q=&tag=&media_id=&cursor=&limit=
+GET /recreation/projects/{id}/shots?source_pts=&q=&role=&cursor=&limit=
+```
+
+搜索文本覆盖显示名、别名、标签和人工备注；时间查询使用整数 PTS 与 time base，
+不能把展示秒数作为精确条件。结果返回稳定 ID、授权缩略图投影、来源链摘要和权限
+范围。客户端只负责排序/筛选当前小结果集，不能下载全库再搜索。
+
+### 资产生命周期
+
+上传原片 → 注册一个 `MediaRecord` → 分析产生 `ShotMediaBinding` 和证据媒体 →
+用户确认/编辑 → 选择替换素材 → 生成任务快照引用 `media_id` → 生成结果注册新的
+`MediaRecord` → 用户明确保存为 `AssetEntry`。删除采用软删除/引用计数检查；有镜头、
+任务或资产条目引用时不能物理删除。签名 URL 只是可刷新投影。
+
+### 迁移边界
+
+本 PR 的复刻时间线暂存结构不应成为长期媒体身份。下一 PR 应先建立媒体索引和
+查询接口，再把 `source_url`、证据 URL 和未来 H3 参考输入改为 `media_id` 快照。
+在此之前只测试分析和时间线确认，不测试替换素材入库或跨镜头复用。
+
 ## 分阶段交付
 
 1. 原片注册与分析：用户拥有的原片登记，ffprobe读取真实PTS、time_base、时长、画幅和音轨；FFmpeg生成切点候选、相邻帧证据与联系表。产物写入用户作用域。分析为异步任务，记录状态/错误，限制执行时间与资源。禁止使用shell拼接用户参数。
