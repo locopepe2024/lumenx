@@ -162,6 +162,18 @@ class RecreationService:
             if current["analysis_id"] != attempt_id or current["status"] != "analyzing":
                 return
             current.update(analysis=result, error=error, status="failed" if error else "review")
+            if result:
+                derived = []
+                for kind, path in [("contact_sheet", result["contact_sheet_url"]),
+                                   *[("evidence_frame", c["before_url"]) for c in result["candidates"]],
+                                   *[("evidence_frame", c["after_url"]) for c in result["candidates"]],
+                                   *[("sample_frame", s["url"]) for s in result["samples"]]]:
+                    media_id = uuid4().hex
+                    derived.append(media_id)
+                    db.execute("INSERT INTO media_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                               (media_id, self.user.owner_profile_id, project_id, kind, Path(path).name,
+                                path, "", json.dumps({"parent_media_id": record["source_media_id"], "analysis_id": attempt_id}), time.time()))
+                current["analysis_media_ids"] = derived
             self._save(db, current)
 
     def confirm(self, project_id, revision, analysis_id, cuts):

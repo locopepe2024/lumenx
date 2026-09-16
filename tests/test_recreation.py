@@ -139,6 +139,12 @@ def test_media_search_is_owner_scoped_and_cursor_paginated(service, video):
     assert len(result["items"]) == 1
     assert result["items"][0]["media_id"] == record["source_media_id"]
     assert service.search_media(project_id="missing")["items"] == []
+    completed_record = completed(service, video)
+    indexed = service.search_media(project_id=completed_record["id"], limit=100)["items"]
+    kinds = {item["kind"] for item in indexed}
+    assert {"source_video", "contact_sheet", "sample_frame"}.issubset(kinds)
+    assert all(item["metadata"].get("parent_media_id") == completed_record["source_media_id"]
+               for item in indexed if item["kind"] != "source_video")
 
 
 def test_timeout_is_explicit(monkeypatch):
