@@ -133,6 +133,14 @@ def test_symlink_source_escape_fails(service, video):
     assert "outside" in service.get(record["id"])["error"]
 
 
+def test_media_search_is_owner_scoped_and_cursor_paginated(service, video):
+    record = register(service, video)
+    result = service.search_media(query="input", kind="source_video", limit=1)
+    assert len(result["items"]) == 1
+    assert result["items"][0]["media_id"] == record["source_media_id"]
+    assert service.search_media(project_id="missing")["items"] == []
+
+
 def test_timeout_is_explicit(monkeypatch):
     monkeypatch.setattr(subprocess, "run", Mock(side_effect=subprocess.TimeoutExpired("ffmpeg", 90)))
     with pytest.raises(ValueError, match="timed out"):

@@ -36,6 +36,8 @@ export function importCuts(text: string, analysis: SourceAnalysis): number[] {
 }
 
 export const recreationApi = {
+  searchMedia: (params: { q?: string; kind?: string; project_id?: string; limit?: number; cursor?: number } = {}) =>
+    axios.get(`${API_URL}/recreation/media`, { params }).then(r => r.data),
   list: (): Promise<RecreationProject[]> => axios.get(`${API_URL}/recreation/projects`).then(r => r.data),
   get: (id: string): Promise<RecreationProject> => axios.get(`${API_URL}/recreation/projects/${id}`).then(r => r.data),
   upload: (file: File): Promise<RecreationProject> => {

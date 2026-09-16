@@ -29,6 +29,7 @@ class RecreationService:
         connection = sqlite3.connect("output/recreation.sqlite3", timeout=10)
         try:
             connection.execute("CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, owner TEXT NOT NULL, data TEXT NOT NULL)")
+            connection.execute("CREATE TABLE IF NOT EXISTS media_records (media_id TEXT PRIMARY KEY, owner TEXT NOT NULL, project_id TEXT, kind TEXT NOT NULL, display_name TEXT NOT NULL, storage_path TEXT NOT NULL, sha256 TEXT NOT NULL, metadata TEXT NOT NULL, created_at REAL NOT NULL)")
             connection.execute("BEGIN IMMEDIATE")
             yield connection
             connection.commit()
@@ -74,7 +75,8 @@ class RecreationService:
                         raise HTTPException(413, "Source exceeds 256 MiB")
                     target.write(chunk)
             digest = fingerprint(source)
-            record = {"id": project_id, "title": Path(filename).name[:200],
+            media_id = uuid4().hex
+            record = {"id": project_id, "title": Path(filename).name[:200], "source_media_id": media_id,
                       "owner_user_id": self.user.user_id, "owner_profile_id": self.user.owner_profile_id,
                       "source_asset_id": uuid4().hex,
                       "source_url": source.relative_to(Path("output").resolve()).as_posix(),
@@ -84,6 +86,8 @@ class RecreationService:
             with self.db() as db:
                 db.execute("INSERT INTO projects VALUES (?, ?, ?)",
                            (project_id, self.user.owner_profile_id, json.dumps(record)))
+                db.execute("INSERT INTO media_records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                           (media_id, self.user.owner_profile_id, project_id, "source_video", record["title"], record["source_url"], digest, json.dumps({"mime": "video"}), time.time()))
             return record
         except BaseException:
             shutil.rmtree(folder)
@@ -101,6 +105,18 @@ class RecreationService:
         with self.db() as db:
             ids = [row[0] for row in db.execute("SELECT id FROM projects WHERE owner=?", (self.user.owner_profile_id,))]
         return sorted([self.get(i) for i in ids], key=lambda p: p["created_at"], reverse=True)
+
+    def search_media(self, *, query="", kind=None, project_id=None, limit=50, cursor=0):
+        limit = max(1, min(int(limit), 100))
+        query = query.strip().lower()
+        with self.db() as db:
+            rows = db.execute("SELECT media_id, project_id, kind, display_name, storage_path, sha256, metadata, created_at FROM media_records WHERE owner=? ORDER BY created_at DESC", (self.user.owner_profile_id,)).fetchall()
+        items = []
+        for row in rows:
+            if kind and row[2] != kind or project_id and row[1] != project_id: continue
+            if query and query not in row[3].lower(): continue
+            items.append({"media_id": row[0], "project_id": row[1], "kind": row[2], "display_name": row[3], "storage_path": row[4], "sha256": row[5], "metadata": json.loads(row[6]), "created_at": row[7]})
+        return {"items": items[cursor:cursor + limit], "next_cursor": cursor + limit if cursor + limit < len(items) else None}
 
     def start(self, project_id, revision):
         with self.db() as db:

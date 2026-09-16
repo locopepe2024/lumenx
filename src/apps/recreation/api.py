@@ -1,5 +1,5 @@
 """Authenticated recreation APIs. Processing stays in the backend's FFmpeg runtime."""
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, Query
 from pydantic import BaseModel, Field, StrictInt
 
 from ..identity import UserContext
@@ -30,6 +30,15 @@ def public(record, user):
 @router.get("/projects")
 def projects(user: UserContext = Depends(require_studio_user)):
     return public(RecreationService(user).list(), user)
+
+
+@router.get("/media")
+def media(q: str = "", kind: str | None = None, project_id: str | None = None,
+         limit: int = Query(50, ge=1, le=100), cursor: int = Query(0, ge=0),
+         user: UserContext = Depends(require_studio_user)):
+    result = RecreationService(user).search_media(query=q, kind=kind, project_id=project_id, limit=limit, cursor=cursor)
+    result["items"] = public(result["items"], user)
+    return result
 
 
 @router.post("/projects", status_code=201)
